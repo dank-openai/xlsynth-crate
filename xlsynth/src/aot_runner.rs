@@ -479,3 +479,75 @@ impl Drop for AlignedBuffer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_metadata() -> AotEntrypointMetadata {
+        AotEntrypointMetadata {
+            symbol: "test_symbol".to_string(),
+            input_buffer_sizes: vec![1],
+            input_buffer_alignments: vec![1],
+            output_buffer_sizes: vec![1],
+            output_buffer_alignments: vec![1],
+            temp_buffer_size: 0,
+            temp_buffer_alignment: 1,
+        }
+    }
+
+    fn make_descriptor(
+        function_ptr: usize,
+        metadata: AotEntrypointMetadata,
+    ) -> AotEntrypointDescriptor<'static> {
+        unsafe { AotEntrypointDescriptor::from_raw_parts_unchecked(&[], function_ptr, metadata) }
+    }
+
+    #[test]
+    fn aot_runner_new_rejects_zero_function_pointer() {
+        let descriptor = make_descriptor(0, sample_metadata());
+        let err = AotRunner::new(descriptor).err().unwrap();
+
+        assert!(err
+            .0
+            .contains("entrypoint function pointer must be non-zero"));
+    }
+
+    #[test]
+    fn aot_runner_new_rejects_input_metadata_length_mismatch() {
+        let mut metadata = sample_metadata();
+        metadata.input_buffer_alignments = Vec::new();
+        let descriptor = make_descriptor(1, metadata);
+        let err = AotRunner::new(descriptor).err().unwrap();
+
+        assert!(err.0.contains("input buffer metadata length mismatch"));
+    }
+
+    #[test]
+    fn aot_runner_new_rejects_output_metadata_length_mismatch() {
+        let mut metadata = sample_metadata();
+        metadata.output_buffer_alignments = Vec::new();
+        let descriptor = make_descriptor(1, metadata);
+        let err = AotRunner::new(descriptor).err().unwrap();
+
+        assert!(err.0.contains("output buffer metadata length mismatch"));
+    }
+
+    #[test]
+    fn leaf_element_helpers_zero_fill_padding_bytes() {
+        let layout = AotElementLayout {
+            offset: 1,
+            data_size: 2,
+            padded_size: 4,
+        };
+
+        let mut write_dst = [0xaa_u8; 8];
+        write_leaf_element(&mut write_dst, &layout, &[0x11, 0x22, 0x33]);
+        assert_eq!(write_dst, [0xaa, 0x11, 0x22, 0x00, 0x00, 0xaa, 0xaa, 0xaa]);
+
+        let read_src = [0xee_u8, 0x11, 0x22, 0x77, 0x88, 0xee];
+        let mut read_dst = [0xcc_u8; 4];
+        read_leaf_element(&read_src, &layout, &mut read_dst);
+        assert_eq!(read_dst, [0x11, 0x22, 0x00, 0x00]);
+    }
+}
