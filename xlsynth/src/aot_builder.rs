@@ -1068,6 +1068,43 @@ fn emit_link_archive(base_name: &str, object_file: &Path) -> AotResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::aot_entrypoint_metadata::{AotElementLayout, AotFunctionParameter};
+
+    fn sample_type_layout(size: usize) -> AotTypeLayout {
+        AotTypeLayout {
+            size,
+            elements: vec![AotElementLayout {
+                offset: 0,
+                data_size: size,
+                padded_size: size,
+            }],
+        }
+    }
+
+    fn sample_signature() -> AotFunctionSignature {
+        AotFunctionSignature {
+            function_name: "test_fn".to_string(),
+            params: vec![AotFunctionParameter {
+                name: "arg0".to_string(),
+                ty: AotType::Bits { bit_count: 8 },
+            }],
+            return_type: AotType::Bits { bit_count: 8 },
+            input_layouts: vec![sample_type_layout(1)],
+            output_layouts: vec![sample_type_layout(1)],
+        }
+    }
+
+    fn sample_metadata() -> AotEntrypointMetadata {
+        AotEntrypointMetadata {
+            symbol: "test_fn".to_string(),
+            input_buffer_sizes: vec![1],
+            input_buffer_alignments: vec![1],
+            output_buffer_sizes: vec![1],
+            output_buffer_alignments: vec![1],
+            temp_buffer_size: 0,
+            temp_buffer_alignment: 1,
+        }
+    }
 
     #[test]
     fn sanitize_identifier_rewrites_non_ident_chars() {
@@ -1079,5 +1116,36 @@ mod tests {
     #[test]
     fn sanitize_value_identifier_handles_keywords() {
         assert_eq!(sanitize_value_identifier("type", "arg"), "type_");
+    }
+
+    #[test]
+    fn validate_signature_and_layouts_accepts_matching_metadata() {
+        let metadata = sample_metadata();
+        let signature = sample_signature();
+
+        assert!(validate_signature_and_layouts(&metadata, &signature).is_ok());
+    }
+
+    #[test]
+    fn validate_signature_and_layouts_rejects_parameter_count_mismatch() {
+        let mut metadata = sample_metadata();
+        metadata.input_buffer_sizes = Vec::new();
+        metadata.input_buffer_alignments = Vec::new();
+        let signature = sample_signature();
+
+        let err = validate_signature_and_layouts(&metadata, &signature).unwrap_err();
+        assert!(err.0.contains("parameter count=1 but input buffer count=0"));
+    }
+
+    #[test]
+    fn validate_signature_and_layouts_rejects_output_layout_size_mismatch() {
+        let mut metadata = sample_metadata();
+        metadata.output_buffer_sizes = vec![2];
+        let signature = sample_signature();
+
+        let err = validate_signature_and_layouts(&metadata, &signature).unwrap_err();
+        assert!(err
+            .0
+            .contains("AOT metadata mismatch for output 0: layout size=1 buffer size=2"));
     }
 }
